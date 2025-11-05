@@ -971,41 +971,6 @@ void TFT_eSPI::spiwrite(uint8_t c)
   end_tft_write();
 }
 
-#if defined(ESP32) && !defined(TFT_PARALLEL_8_BIT)
-
-//
-// DMA transaction support functions
-//
-
-// Pool of transactions for DMA
-spi_transaction_t TFT_eSPI::dma_trans_pool[DMA_TRANS_POOL_SIZE];
-
-// Function to get a transaction from the pool
-spi_transaction_t* TFT_eSPI::getTransaction(void) {
-  dma_pool_ptr = (dma_pool_ptr + 1) % DMA_TRANS_POOL_SIZE;
-  spi_transaction_t* trans = &dma_trans_pool[dma_pool_ptr];
-  memset(trans, 0, sizeof(spi_transaction_t));
-  return trans;
-}
-
-/***************************************************************************************
-** Function name:           dmaTransaction
-** Description:             Queue a DMA transaction and wait if queue is full
-***************************************************************************************/
-void TFT_eSPI::dmaTransaction(spi_transaction_t* trans) {
-  if (dmaCount >= DMA_TRANS_POOL_SIZE) {
-    spi_transaction_t *rtrans;
-    esp_err_t ret = spi_device_get_trans_result(dmaHAL, &rtrans, portMAX_DELAY);
-    assert(ret == ESP_OK);
-    dmaCount--;
-  }
-  esp_err_t ret = spi_device_queue_trans(dmaHAL, trans, portMAX_DELAY);
-  assert(ret == ESP_OK);
-  dmaCount++;
-}
-
-#endif
-
 
 /***************************************************************************************
 ** Function name:           writecommand
@@ -1014,18 +979,6 @@ void TFT_eSPI::dmaTransaction(spi_transaction_t* trans) {
 #ifndef RM68120_DRIVER
 void TFT_eSPI::writecommand(uint8_t c)
 {
-#if defined(ESP32) && !defined(TFT_PARALLEL_8_BIT)
-  if (DMA_Enabled) {
-    spi_transaction_t* trans = getTransaction();
-    trans->length = 8;
-    trans->tx_data[0] = c;
-    trans->user = (void*)0; // Command
-    trans->flags = SPI_TRANS_USE_TXDATA;
-    dmaTransaction(trans);
-    return;
-  }
-#endif
-
   begin_tft_write();
 
   DC_C;
@@ -1089,18 +1042,6 @@ void TFT_eSPI::writeRegister16(uint16_t c, uint16_t d)
 ***************************************************************************************/
 void TFT_eSPI::writedata(uint8_t d)
 {
-#if defined(ESP32) && !defined(TFT_PARALLEL_8_BIT)
-  if (DMA_Enabled) {
-    spi_transaction_t* trans = getTransaction();
-    trans->length = 8;
-    trans->tx_data[0] = d;
-    trans->user = (void*)1; // Data
-    trans->flags = SPI_TRANS_USE_TXDATA;
-    dmaTransaction(trans);
-    return;
-  }
-#endif
-
   begin_tft_write();
 
   DC_D;        // Play safe, but should already be in data mode
@@ -3540,18 +3481,6 @@ void TFT_eSPI::setWindow(int32_t x0, int32_t y0, int32_t x1, int32_t y1)
       TX_FIFO = TFT_RAMWR;
     #endif
   #else
-    #if defined(ESP32) && !defined(TFT_PARALLEL_8_BIT)
-      if (DMA_Enabled) {
-        writecommand(TFT_CASET);
-        writedata(x0 >> 8); writedata(x0);
-        writedata(x1 >> 8); writedata(x1);
-        writecommand(TFT_PASET);
-        writedata(y0 >> 8); writedata(y0);
-        writedata(y1 >> 8); writedata(y1);
-        writecommand(TFT_RAMWR);
-        return;
-      }
-    #endif
     SPI_BUSY_CHECK;
     DC_C; tft_Write_8(TFT_CASET);
     DC_D; tft_Write_32C(x0, x1);

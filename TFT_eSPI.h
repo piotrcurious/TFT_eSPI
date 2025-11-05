@@ -796,7 +796,7 @@ class TFT_eSPI : public Print { friend class TFT_eSprite; // Sprite class has ac
   void     dmaWait(void); // wait until DMA is complete
 
   bool     DMA_Enabled = false;   // Flag for DMA enabled state
-  uint8_t  dmaCount = 0;          // Number of DMA transactions in flight
+  uint8_t  spiBusyCheck = 0;      // Number of ESP32 transfer buffers to check
 
   // Bare metal functions
   void     startWrite(void);                         // Begin SPI transaction
@@ -901,15 +901,6 @@ class TFT_eSPI : public Print { friend class TFT_eSprite; // Sprite class has ac
   getColorCallback getColor = nullptr; // Smooth font callback function pointer
 
   bool     locked, inTransaction, lockTransaction; // SPI transaction and mutex lock flags
-
-#if defined(ESP32) && !defined(TFT_PARALLEL_8_BIT)
-  // Non-blocking DMA transaction support
-  spi_transaction_t* getTransaction();
-  void dmaTransaction(spi_transaction_t* trans);
-  static const int DMA_TRANS_POOL_SIZE = 7;
-  static spi_transaction_t dma_trans_pool[DMA_TRANS_POOL_SIZE];
-  int dma_pool_ptr = 0;
-#endif
 
  //-------------------------------------- protected ----------------------------------//
  protected:
