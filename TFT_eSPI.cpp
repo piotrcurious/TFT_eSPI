@@ -6190,8 +6190,9 @@ void TFT_eSPI::initDMA_queue(void)
   if (dma_queue) return;
   dma_queue = xQueueCreate(MAX_DMA_TRANSACTIONS, sizeof(spi_transaction_t*));
   for (int i = 0; i < MAX_DMA_TRANSACTIONS; i++) {
-    memset(&dma_spi_transaction[i], 0, sizeof(spi_transaction_t));
+    // Each transaction is statically allocated and has a pointer to its own static buffer
     dma_spi_transaction[i].tx_buffer = dma_buffer[i];
+    // Add the transaction pointer to the queue
     xQueueSend(dma_queue, &dma_spi_transaction[i], 0);
   }
 }
@@ -6204,10 +6205,17 @@ spi_transaction_t* TFT_eSPI::getTransaction(void)
 {
   spi_transaction_t* trans;
   xQueueReceive(dma_queue, &trans, portMAX_DELAY);
-  void* p = trans->tx_buffer;
+
+  // Get the index of the transaction in the static array
+  int i = trans - dma_spi_transaction;
+
+  // Zero the transaction structure
   memset(trans, 0, sizeof(spi_transaction_t));
-  trans->tx_buffer = p;
-  trans->user = (void*)1;
+
+  // Restore the pointer to the paired static buffer
+  trans->tx_buffer = dma_buffer[i];
+
+  trans->user = (void*)1; // Default to data transaction
   return trans;
 }
 

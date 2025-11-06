@@ -581,10 +581,18 @@ void TFT_eSPI::pushBlockDMA(uint16_t color, uint32_t len)
     if (len_to_send > TFT_SPI_EFFICIENT_BUFFER_SIZE) len_to_send = TFT_SPI_EFFICIENT_BUFFER_SIZE;
 
     spi_transaction_t* spi_trans = getTransaction();
+    uint32_t* buf = (uint32_t*)spi_trans->tx_buffer;
 
-    uint16_t* buf = (uint16_t*)spi_trans->tx_buffer;
-    for (uint32_t i = 0; i < len_to_send; i++) {
-        buf[i] = color;
+    // Calculate the 32-bit value for the color
+    uint32_t color32 = (color << 16) | color;
+
+    // Quickly fill the buffer with the color
+    if ((color & 0xFF) == (color >> 8)) {
+        memset(buf, color & 0xFF, len_to_send * 2);
+    } else {
+        for (uint32_t i = 0; i < (len_to_send + 1) / 2; i++) {
+            buf[i] = color32;
+        }
     }
 
     queueTransaction(spi_trans, len_to_send * 16);
@@ -611,7 +619,7 @@ void TFT_eSPI::pushPixelsDMA(const uint16_t* image, uint32_t len)
     spi_transaction_t* spi_trans = getTransaction();
 
     // FIXME: _swapBytes logic needs to be implemented here
-    memcpy(spi_trans->tx_buffer, p, len_to_send * 2);
+    spi_trans->tx_buffer = p;
 
     queueTransaction(spi_trans, len_to_send * 16);
 
