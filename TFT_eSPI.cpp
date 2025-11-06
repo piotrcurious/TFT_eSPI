@@ -6204,7 +6204,9 @@ spi_transaction_t* TFT_eSPI::getTransaction(void)
 {
   spi_transaction_t* trans;
   xQueueReceive(dma_queue, &trans, portMAX_DELAY);
+  void* p = trans->tx_buffer;
   memset(trans, 0, sizeof(spi_transaction_t));
+  trans->tx_buffer = p;
   trans->user = (void*)1;
   return trans;
 }

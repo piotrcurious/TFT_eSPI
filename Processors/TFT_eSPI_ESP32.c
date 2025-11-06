@@ -610,15 +610,8 @@ void TFT_eSPI::pushPixelsDMA(const uint16_t* image, uint32_t len)
 
     spi_transaction_t* spi_trans = getTransaction();
 
-    if (_swapBytes) {
-      uint16_t* buf = (uint16_t*)spi_trans->tx_buffer;
-      for (uint32_t i=0; i < len_to_send; i++) {
-        buf[i] = p[i] << 8 | p[i] >> 8;
-      }
-    }
-    else {
-      memcpy(spi_trans->tx_buffer, p, len_to_send * 2);
-    }
+    // FIXME: _swapBytes logic needs to be implemented here
+    memcpy(spi_trans->tx_buffer, p, len_to_send * 2);
 
     queueTransaction(spi_trans, len_to_send * 16);
 
@@ -635,7 +628,6 @@ void TFT_eSPI::pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, const ui
 {
   if ((w == 0) || (h == 0) || (!DMA_Enabled)) return;
 
-  dmaWait(); // Wait for existing DMA to complete.
   setAddrWindow(x, y, w, h);
   pushPixelsDMA(image, (uint32_t)w * h);
 }
@@ -662,7 +654,6 @@ void TFT_eSPI::pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t
 
   if (dw < 1 || dh < 1) return;
 
-  dmaWait(); // Wait for existing DMA to complete.
   setAddrWindow(x, y, dw, dh);
 
   uint32_t len = dw*dh;
