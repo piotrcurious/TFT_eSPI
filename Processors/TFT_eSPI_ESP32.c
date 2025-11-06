@@ -620,15 +620,10 @@ void TFT_eSPI::pushPixelsDMA(uint16_t* image, uint32_t len)
 {
   if ((len == 0) || (!DMA_Enabled)) return;
 
+  dmaWait();
+
   if(_swapBytes) {
     for (uint32_t i = 0; i < len; i++) (image[i] = image[i] << 8 | image[i] >> 8);
-  }
-
-  while (spiBusyCheck >= 7) {
-    spi_transaction_t *rtrans;
-    esp_err_t ret = spi_device_get_trans_result(dmaHAL, &rtrans, portMAX_DELAY);
-    assert(ret == ESP_OK);
-    spiBusyCheck--;
   }
 
   esp_err_t ret;
@@ -656,8 +651,27 @@ void TFT_eSPI::pushPixelsDMA(uint16_t* image, uint32_t len)
 void TFT_eSPI::pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t const* image)
 {
   if ((w == 0) || (h == 0) || (!DMA_Enabled)) return;
+
+  uint32_t len = w*h;
+
+  dmaWait();
+
   setAddrWindow(x, y, w, h);
-  pushPixelsDMA((uint16_t*)image, w*h);
+
+  esp_err_t ret;
+  static spi_transaction_t trans;
+
+  memset(&trans, 0, sizeof(spi_transaction_t));
+
+  trans.user = (void *)1;
+  trans.tx_buffer = image;   //Data pointer
+  trans.length = len * 16;   //Data length, in bits
+  trans.flags = 0;           //SPI_TRANS_USE_TXDATA flag
+
+  ret = spi_device_queue_trans(dmaHAL, &trans, portMAX_DELAY);
+  assert(ret == ESP_OK);
+
+  spiBusyCheck++;
 }
 
 
@@ -683,16 +697,11 @@ void TFT_eSPI::pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t
 
   if (dw < 1 || dh < 1) return;
 
-  if (buffer == nullptr && dw == w && dh == h) {
-    setAddrWindow(x, y, dw, dh);
-    pushPixelsDMA(image, dw*dh);
-    return;
-  }
-
   uint32_t len = dw*dh;
 
   if (buffer == nullptr) {
     buffer = image;
+    dmaWait();
   }
 
   // If image is clipped, copy pixels into a contiguous block
@@ -721,8 +730,24 @@ void TFT_eSPI::pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t
     }
   }
 
+  if (spiBusyCheck) dmaWait(); // In case we did not wait earlier
+
   setAddrWindow(x, y, dw, dh);
-  pushPixelsDMA(buffer, len);
+
+  esp_err_t ret;
+  static spi_transaction_t trans;
+
+  memset(&trans, 0, sizeof(spi_transaction_t));
+
+  trans.user = (void *)1;
+  trans.tx_buffer = buffer;  //finally send the line data
+  trans.length = len * 16;   //Data length, in bits
+  trans.flags = 0;           //SPI_TRANS_USE_TXDATA flag
+
+  ret = spi_device_queue_trans(dmaHAL, &trans, portMAX_DELAY);
+  assert(ret == ESP_OK);
+
+  spiBusyCheck++;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
