@@ -980,14 +980,13 @@ void TFT_eSPI::spiwrite(uint8_t c)
 void TFT_eSPI::writecommand(uint8_t c)
 {
 #if defined (ESP32) && !defined(TFT_PARALLEL_8_BIT)
-  if (dma_enabled) {
-    spi_transaction_t trans;
-    memset(&trans, 0, sizeof(trans));
-    trans.length = 8;
-    trans.flags = SPI_TRANS_USE_TXDATA;
-    trans.tx_data[0] = c;
-    trans.user = (void*)0;
-    spi_device_queue_trans(spi_handle, &trans, portMAX_DELAY);
+  if (DMA_Enabled) {
+    spi_transaction_t* trans = getTransaction();
+    trans->length = 8;
+    trans->flags = SPI_TRANS_USE_TXDATA;
+    trans->tx_data[0] = c;
+    trans->user = (void*)0;
+    queueTransaction(trans, 8);
     return;
   }
 #endif
@@ -1005,15 +1004,14 @@ void TFT_eSPI::writecommand(uint8_t c)
 void TFT_eSPI::writecommand(uint16_t c)
 {
 #if defined (ESP32) && !defined(TFT_PARALLEL_8_BIT)
-  if (dma_enabled) {
-    spi_transaction_t trans;
-    memset(&trans, 0, sizeof(trans));
-    trans.length = 16;
-    trans.flags = SPI_TRANS_USE_TXDATA;
-    trans.tx_data[0] = c >> 8;
-    trans.tx_data[1] = c;
-    trans.user = (void*)0;
-    spi_device_queue_trans(spi_handle, &trans, portMAX_DELAY);
+  if (DMA_Enabled) {
+    spi_transaction_t* trans = getTransaction();
+    trans->length = 16;
+    trans->flags = SPI_TRANS_USE_TXDATA;
+    trans->tx_data[0] = c >> 8;
+    trans->tx_data[1] = c;
+    trans->user = (void*)0;
+    queueTransaction(trans, 16);
     return;
   }
 #endif
@@ -1068,14 +1066,13 @@ void TFT_eSPI::writeRegister16(uint16_t c, uint16_t d)
 void TFT_eSPI::writedata(uint8_t d)
 {
 #if defined (ESP32) && !defined(TFT_PARALLEL_8_BIT)
-  if (dma_enabled) {
-    spi_transaction_t trans;
-    memset(&trans, 0, sizeof(trans));
-    trans.length = 8;
-    trans.flags = SPI_TRANS_USE_TXDATA;
-    trans.tx_data[0] = d;
-    trans.user = (void*)1;
-    spi_device_queue_trans(spi_handle, &trans, portMAX_DELAY);
+  if (DMA_Enabled) {
+    spi_transaction_t* trans = getTransaction();
+    trans->length = 8;
+    trans->flags = SPI_TRANS_USE_TXDATA;
+    trans->tx_data[0] = d;
+    trans->user = (void*)1;
+    queueTransaction(trans, 8);
     return;
   }
 #endif
@@ -6174,6 +6171,63 @@ void TFT_eSPI::getSetup(setup_t &tft_settings)
 #endif
 }
 
+
+////////////////////////////////////////////////////////////////////////////////////////
+#if defined (ESP32_DMA) && !defined (TFT_PARALLEL_8_BIT)
+
+// C++ static initialisation
+// C++ static initialisation
+spi_transaction_t TFT_eSPI::dma_spi_transaction[MAX_DMA_TRANSACTIONS];
+uint16_t TFT_eSPI::dma_buffer[MAX_DMA_TRANSACTIONS][TFT_SPI_EFFICIENT_BUFFER_SIZE];
+QueueHandle_t TFT_eSPI::dma_queue = nullptr;
+
+/***************************************************************************************
+** Function name:           initDMA_queue
+** Description:             Initialise the DMA available transaction queue
+***************************************************************************************/
+void TFT_eSPI::initDMA_queue(void)
+{
+  if (dma_queue) return;
+  dma_queue = xQueueCreate(MAX_DMA_TRANSACTIONS, sizeof(spi_transaction_t*));
+  for (int i = 0; i < MAX_DMA_TRANSACTIONS; i++) {
+    memset(&dma_spi_transaction[i], 0, sizeof(spi_transaction_t));
+    dma_spi_transaction[i].tx_buffer = dma_buffer[i];
+    xQueueSend(dma_queue, &dma_spi_transaction[i], 0);
+  }
+}
+
+/***************************************************************************************
+** Function name:           getTransaction
+** Description:             Get a fresh transaction from the queue
+***************************************************************************************/
+spi_transaction_t* TFT_eSPI::getTransaction(void)
+{
+  spi_transaction_t* trans;
+  xQueueReceive(dma_queue, &trans, portMAX_DELAY);
+  memset(trans, 0, sizeof(spi_transaction_t));
+  trans->user = (void*)1;
+  return trans;
+}
+
+/***************************************************************************************
+** Function name:           queueTransaction
+** Description:             Queue the transaction for DMA transfer
+***************************************************************************************/
+void TFT_eSPI::queueTransaction(spi_transaction_t* trans, int32_t len)
+{
+  trans->length = len;
+  spi_device_queue_trans(dmaHAL, trans, portMAX_DELAY);
+}
+
+/***************************************************************************************
+** Function name:           dma_post_callback
+** Description:             Release the transaction structure after a DMA transfer
+***************************************************************************************/
+void IRAM_ATTR TFT_eSPI::dma_post_callback(spi_transaction_t* trans)
+{
+    if(dma_queue) xQueueSendFromISR(dma_queue, &trans, NULL);
+}
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////////////
 #ifdef TOUCH_CS

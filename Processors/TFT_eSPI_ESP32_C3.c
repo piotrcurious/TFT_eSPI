@@ -600,19 +600,9 @@ void TFT_eSPI::pushPixels(const void* data_in, uint32_t len){
 ***************************************************************************************/
 bool TFT_eSPI::dmaBusy(void)
 {
-  if (!DMA_Enabled || !spiBusyCheck) return false;
-
-  spi_transaction_t *rtrans;
-  esp_err_t ret;
-  uint8_t checks = spiBusyCheck;
-  for (int i = 0; i < checks; ++i)
-  {
-    ret = spi_device_get_trans_result(dmaHAL, &rtrans, 0);
-    if (ret == ESP_OK) spiBusyCheck--;
-  }
-
-  //Serial.print("spiBusyCheck=");Serial.println(spiBusyCheck);
-  if (spiBusyCheck ==0) return false;
+  if (!dma_queue) return false;
+  // If the queue is full, then all transactions are complete
+  if (uxQueueMessagesWaiting(dma_queue) == MAX_DMA_TRANSACTIONS) return false;
   return true;
 }
 
@@ -623,87 +613,93 @@ bool TFT_eSPI::dmaBusy(void)
 ***************************************************************************************/
 void TFT_eSPI::dmaWait(void)
 {
-  if (!DMA_Enabled || !spiBusyCheck) return;
-  spi_transaction_t *rtrans;
-  esp_err_t ret;
-  for (int i = 0; i < spiBusyCheck; ++i)
-  {
-    ret = spi_device_get_trans_result(dmaHAL, &rtrans, portMAX_DELAY);
-    assert(ret == ESP_OK);
-  }
-  spiBusyCheck = 0;
+  if (!dma_queue) return;
+  // Wait until the queue is full
+  while (uxQueueMessagesWaiting(dma_queue) < MAX_DMA_TRANSACTIONS) delay(1);
 }
 
 
 /***************************************************************************************
-** Function name:           pushPixelsDMA
-** Description:             Push pixels to TFT (len must be less than 32767)
+** Function name:           pushBlockDMA
+** Description:             Push a block of pixels of the same colour
 ***************************************************************************************/
-// This will byte swap the original image if setSwapBytes(true) was called by sketch.
-void TFT_eSPI::pushPixelsDMA(uint16_t* image, uint32_t len)
+void TFT_eSPI::pushBlockDMA(uint16_t color, uint32_t len)
 {
   if ((len == 0) || (!DMA_Enabled)) return;
 
-  dmaWait();
+  if (_swapBytes) color = color << 8 | color >> 8;
 
-  if(_swapBytes) {
-    for (uint32_t i = 0; i < len; i++) (image[i] = image[i] << 8 | image[i] >> 8);
+  uint32_t len_to_send;
+
+  while(len > 0) {
+    len_to_send = len;
+    if (len_to_send > TFT_SPI_EFFICIENT_BUFFER_SIZE) len_to_send = TFT_SPI_EFFICIENT_BUFFER_SIZE;
+
+    spi_transaction_t* spi_trans = getTransaction();
+
+    uint16_t* buf = (uint16_t*)spi_trans->tx_buffer;
+    for (uint32_t i = 0; i < len_to_send; i++) {
+        buf[i] = color;
+    }
+
+    queueTransaction(spi_trans, len_to_send * 16);
+
+    len -= len_to_send;
   }
-
-  esp_err_t ret;
-  static spi_transaction_t trans;
-
-  memset(&trans, 0, sizeof(spi_transaction_t));
-
-  trans.user = (void *)1;
-  trans.tx_buffer = image;  //finally send the line data
-  trans.length = len * 16;        //Data length, in bits
-  trans.flags = 0;                //SPI_TRANS_USE_TXDATA flag
-
-  ret = spi_device_queue_trans(dmaHAL, &trans, portMAX_DELAY);
-  assert(ret == ESP_OK);
-
-  spiBusyCheck++;
 }
 
+/***************************************************************************************
+** Function name:           pushPixelsDMA
+** Description:             Push pixels to TFT
+***************************************************************************************/
+void TFT_eSPI::pushPixelsDMA(const uint16_t* image, uint32_t len)
+{
+  if ((len == 0) || (!DMA_Enabled)) return;
+
+  uint32_t len_to_send;
+  const uint16_t *p = image;
+
+  while(len > 0) {
+    len_to_send = len;
+    if (len_to_send > TFT_SPI_EFFICIENT_BUFFER_SIZE) len_to_send = TFT_SPI_EFFICIENT_BUFFER_SIZE;
+
+    spi_transaction_t* spi_trans = getTransaction();
+
+    if (_swapBytes) {
+      uint16_t* buf = (uint16_t*)spi_trans->tx_buffer;
+      for (uint32_t i=0; i < len_to_send; i++) {
+        buf[i] = p[i] << 8 | p[i] >> 8;
+      }
+    }
+    else {
+      memcpy(spi_trans->tx_buffer, p, len_to_send * 2);
+    }
+
+    queueTransaction(spi_trans, len_to_send * 16);
+
+    p += len_to_send;
+    len -= len_to_send;
+  }
+}
 
 /***************************************************************************************
 ** Function name:           pushImageDMA
-** Description:             Push image to a window (w*h must be less than 65536)
+** Description:             Push image to a window
 ***************************************************************************************/
-// Fixed const data assumed, will NOT clip or swap bytes
-void TFT_eSPI::pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t const* image)
+void TFT_eSPI::pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t* image)
 {
   if ((w == 0) || (h == 0) || (!DMA_Enabled)) return;
 
-  uint32_t len = w*h;
-
-  dmaWait();
-
+  dmaWait(); // Wait for existing DMA to complete.
   setAddrWindow(x, y, w, h);
-
-  esp_err_t ret;
-  static spi_transaction_t trans;
-
-  memset(&trans, 0, sizeof(spi_transaction_t));
-
-  trans.user = (void *)1;
-  trans.tx_buffer = image;   //Data pointer
-  trans.length = len * 16;   //Data length, in bits
-  trans.flags = 0;           //SPI_TRANS_USE_TXDATA flag
-
-  ret = spi_device_queue_trans(dmaHAL, &trans, portMAX_DELAY);
-  assert(ret == ESP_OK);
-
-  spiBusyCheck++;
+  pushPixelsDMA(image, (uint32_t)w * h);
 }
 
 
 /***************************************************************************************
 ** Function name:           pushImageDMA
-** Description:             Push image to a window (w*h must be less than 65536)
+** Description:             Push image to a window with clipping and buffering
 ***************************************************************************************/
-// This will clip and also swap bytes if setSwapBytes(true) was called by sketch
 void TFT_eSPI::pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t* image, uint16_t* buffer)
 {
   if ((x >= _vpW) || (y >= _vpH) || (!DMA_Enabled)) return;
@@ -721,57 +717,30 @@ void TFT_eSPI::pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t
 
   if (dw < 1 || dh < 1) return;
 
-  uint32_t len = dw*dh;
-
-  if (buffer == nullptr) {
-    buffer = image;
-    dmaWait();
-  }
-
-  // If image is clipped, copy pixels into a contiguous block
-  if ( (dw != w) || (dh != h) ) {
-    if(_swapBytes) {
-      for (int32_t yb = 0; yb < dh; yb++) {
-        for (int32_t xb = 0; xb < dw; xb++) {
-          uint32_t src = xb + dx + w * (yb + dy);
-          (buffer[xb + yb * dw] = image[src] << 8 | image[src] >> 8);
-        }
-      }
-    }
-    else {
-      for (int32_t yb = 0; yb < dh; yb++) {
-        memcpy((uint8_t*) (buffer + yb * dw), (uint8_t*) (image + dx + w * (yb + dy)), dw << 1);
-      }
-    }
-  }
-  // else, if a buffer pointer has been provided copy whole image to the buffer
-  else if (buffer != image || _swapBytes) {
-    if(_swapBytes) {
-      for (uint32_t i = 0; i < len; i++) (buffer[i] = image[i] << 8 | image[i] >> 8);
-    }
-    else {
-      memcpy(buffer, image, len*2);
-    }
-  }
-
-  if (spiBusyCheck) dmaWait(); // In case we did not wait earlier
-
+  dmaWait(); // Wait for existing DMA to complete.
   setAddrWindow(x, y, dw, dh);
 
-  esp_err_t ret;
-  static spi_transaction_t trans;
+  uint32_t len = dw*dh;
 
-  memset(&trans, 0, sizeof(spi_transaction_t));
+  // If image is clipped, copy pixels into a contiguous buffer
+  if ( (dw != w) || (dh != h) ) {
+    // A buffer must be provided
+    if (buffer == nullptr) return;
 
-  trans.user = (void *)1;
-  trans.tx_buffer = buffer;  //finally send the line data
-  trans.length = len * 16;   //Data length, in bits
-  trans.flags = 0;           //SPI_TRANS_USE_TXDATA flag
-
-  ret = spi_device_queue_trans(dmaHAL, &trans, portMAX_DELAY);
-  assert(ret == ESP_OK);
-
-  spiBusyCheck++;
+    for (int32_t yb = 0; yb < dh; yb++) {
+      memcpy((uint8_t*) (buffer + yb * dw), (uint8_t*) (image + dx + w * (yb + dy)), dw << 1);
+    }
+    pushPixelsDMA(buffer, len);
+  }
+  // else if buffer is provided, copy to it first.
+  else if (buffer != nullptr) {
+      memcpy(buffer, image, len * 2);
+      pushPixelsDMA(buffer, len);
+  }
+  else {
+    // No clipping, no buffer. Can push image directly.
+    pushPixelsDMA(image, len);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -810,7 +779,7 @@ bool TFT_eSPI::initDMA(bool ctrl_cs)
     .data5_io_num = -1,
     .data6_io_num = -1,
     .data7_io_num = -1,
-    .max_transfer_sz = TFT_WIDTH * TFT_HEIGHT * 2 + 8, // TFT screen size
+    .max_transfer_sz = (DMA_BUFFER_SIZE * 2) + 8,
     .flags = 0,
     .intr_flags = 0
   };
@@ -830,14 +799,16 @@ bool TFT_eSPI::initDMA(bool ctrl_cs)
     .input_delay_ns = 0,
     .spics_io_num = pin,
     .flags = SPI_DEVICE_NO_DUMMY, //0,
-    .queue_size = 7,
+    .queue_size = (DMA_BUFFER_SIZE * 2) / TFT_SPI_EFFICIENT_BUFFER_SIZE,
     .pre_cb = dc_callback, //Callback to handle D/C line
-    .post_cb = 0
+    .post_cb = dma_post_callback
   };
   ret = spi_bus_initialize(spi_host, &buscfg, DMA_CHANNEL);
   ESP_ERROR_CHECK(ret);
   ret = spi_bus_add_device(spi_host, &devcfg, &dmaHAL);
   ESP_ERROR_CHECK(ret);
+
+  initDMA_queue();
 
   DMA_Enabled = true;
   spiBusyCheck = 0;
