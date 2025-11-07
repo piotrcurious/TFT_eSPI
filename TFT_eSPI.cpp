@@ -979,6 +979,19 @@ void TFT_eSPI::spiwrite(uint8_t c)
 #ifndef RM68120_DRIVER
 void TFT_eSPI::writecommand(uint8_t c)
 {
+#ifdef ESP32_DMA
+  if (DMA_Enabled) {
+    spi_transaction_t* t = getTransaction();
+    t->user = (void*)0;
+    t->tx_data[0] = c >> 8;
+    t->tx_data[1] = c;
+    t->length = 16;
+    t->flags = SPI_TRANS_USE_TXDATA;
+    spi_device_queue_trans(dmaHAL, t, portMAX_DELAY);
+    return;
+  }
+#endif
+
   begin_tft_write();
 
   DC_C;
@@ -992,6 +1005,18 @@ void TFT_eSPI::writecommand(uint8_t c)
 #else
 void TFT_eSPI::writecommand(uint16_t c)
 {
+#ifdef ESP32_DMA
+  if (DMA_Enabled) {
+    spi_transaction_t* t = getTransaction();
+    t->user = (void*)0;
+    t->tx_data[0] = c;
+    t->length = 8;
+    t->flags = SPI_TRANS_USE_TXDATA;
+    spi_device_queue_trans(dmaHAL, t, portMAX_DELAY);
+    return;
+  }
+#endif
+
   begin_tft_write();
 
   DC_C;
@@ -1042,6 +1067,17 @@ void TFT_eSPI::writeRegister16(uint16_t c, uint16_t d)
 ***************************************************************************************/
 void TFT_eSPI::writedata(uint8_t d)
 {
+#ifdef ESP32_DMA
+  if (DMA_Enabled) {
+    spi_transaction_t* t = getTransaction();
+    t->tx_data[0] = d;
+    t->length = 8;
+    t->flags = SPI_TRANS_USE_TXDATA;
+    spi_device_queue_trans(dmaHAL, t, portMAX_DELAY);
+    return;
+  }
+#endif
+
   begin_tft_write();
 
   DC_D;        // Play safe, but should already be in data mode

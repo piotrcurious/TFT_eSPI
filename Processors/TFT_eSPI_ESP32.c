@@ -30,6 +30,35 @@
 #ifdef ESP32_DMA
   // DMA SPA handle
   spi_device_handle_t dmaHAL;
+
+#define MAX_DMA_TRANSACTIONS 8
+  static spi_transaction_t trans[MAX_DMA_TRANSACTIONS];
+  static xQueueHandle dma_queue = NULL;
+
+  /***************************************************************************************
+  ** Function name:           post_cb
+  ** Description:             Callback to queue a completed transaction
+  ***************************************************************************************/
+  static void IRAM_ATTR post_cb(spi_transaction_t *t)
+  {
+    if (dma_queue) xQueueSendFromISR(dma_queue, &t, NULL);
+  }
+
+  /***************************************************************************************
+  ** Function name:           getTransaction
+  ** Description:             Get a fresh transaction buffer
+  ***************************************************************************************/
+  static spi_transaction_t* getTransaction(void)
+  {
+    spi_transaction_t* t = NULL;
+    if (dma_queue) xQueueReceive(dma_queue, &t, portMAX_DELAY);
+    if (t) {
+      memset(t, 0, sizeof(spi_transaction_t));
+      t->user = (void*)1; // Set D/C to data by default
+    }
+    return t;
+  }
+
   #ifdef CONFIG_IDF_TARGET_ESP32
     #define DMA_CHANNEL 1
     #ifdef USE_HSPI_PORT
@@ -576,20 +605,9 @@ void TFT_eSPI::pushPixels(const void* data_in, uint32_t len){
 ***************************************************************************************/
 bool TFT_eSPI::dmaBusy(void)
 {
-  if (!DMA_Enabled || !spiBusyCheck) return false;
+  if (!DMA_Enabled || !dma_queue) return false;
 
-  spi_transaction_t *rtrans;
-  esp_err_t ret;
-  uint8_t checks = spiBusyCheck;
-  for (int i = 0; i < checks; ++i)
-  {
-    ret = spi_device_get_trans_result(dmaHAL, &rtrans, 0);
-    if (ret == ESP_OK) spiBusyCheck--;
-  }
-
-  //Serial.print("spiBusyCheck=");Serial.println(spiBusyCheck);
-  if (spiBusyCheck ==0) return false;
-  return true;
+  return (uxQueueMessagesWaiting(dma_queue) < MAX_DMA_TRANSACTIONS);
 }
 
 
@@ -599,15 +617,11 @@ bool TFT_eSPI::dmaBusy(void)
 ***************************************************************************************/
 void TFT_eSPI::dmaWait(void)
 {
-  if (!DMA_Enabled || !spiBusyCheck) return;
-  spi_transaction_t *rtrans;
-  esp_err_t ret;
-  for (int i = 0; i < spiBusyCheck; ++i)
-  {
-    ret = spi_device_get_trans_result(dmaHAL, &rtrans, portMAX_DELAY);
-    assert(ret == ESP_OK);
+  if (!DMA_Enabled || !dma_queue) return;
+
+  while (uxQueueMessagesWaiting(dma_queue) < MAX_DMA_TRANSACTIONS) {
+    vTaskDelay(1);
   }
-  spiBusyCheck = 0;
 }
 
 
@@ -620,26 +634,15 @@ void TFT_eSPI::pushPixelsDMA(uint16_t* image, uint32_t len)
 {
   if ((len == 0) || (!DMA_Enabled)) return;
 
-  dmaWait();
-
   if(_swapBytes) {
     for (uint32_t i = 0; i < len; i++) (image[i] = image[i] << 8 | image[i] >> 8);
   }
 
-  esp_err_t ret;
-  static spi_transaction_t trans;
+  spi_transaction_t* t = getTransaction();
+  t->tx_buffer = image;
+  t->length = len * 16;
 
-  memset(&trans, 0, sizeof(spi_transaction_t));
-
-  trans.user = (void *)1;
-  trans.tx_buffer = image;  //finally send the line data
-  trans.length = len * 16;        //Data length, in bits
-  trans.flags = 0;                //SPI_TRANS_USE_TXDATA flag
-
-  ret = spi_device_queue_trans(dmaHAL, &trans, portMAX_DELAY);
-  assert(ret == ESP_OK);
-
-  spiBusyCheck++;
+  spi_device_queue_trans(dmaHAL, t, portMAX_DELAY);
 }
 
 
@@ -654,24 +657,13 @@ void TFT_eSPI::pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t
 
   uint32_t len = w*h;
 
-  dmaWait();
-
   setAddrWindow(x, y, w, h);
 
-  esp_err_t ret;
-  static spi_transaction_t trans;
+  spi_transaction_t* t = getTransaction();
+  t->tx_buffer = image;
+  t->length = len * 16;
 
-  memset(&trans, 0, sizeof(spi_transaction_t));
-
-  trans.user = (void *)1;
-  trans.tx_buffer = image;   //Data pointer
-  trans.length = len * 16;   //Data length, in bits
-  trans.flags = 0;           //SPI_TRANS_USE_TXDATA flag
-
-  ret = spi_device_queue_trans(dmaHAL, &trans, portMAX_DELAY);
-  assert(ret == ESP_OK);
-
-  spiBusyCheck++;
+  spi_device_queue_trans(dmaHAL, t, portMAX_DELAY);
 }
 
 
@@ -701,7 +693,6 @@ void TFT_eSPI::pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t
 
   if (buffer == nullptr) {
     buffer = image;
-    dmaWait();
   }
 
   // If image is clipped, copy pixels into a contiguous block
@@ -730,24 +721,13 @@ void TFT_eSPI::pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t
     }
   }
 
-  if (spiBusyCheck) dmaWait(); // In case we did not wait earlier
-
   setAddrWindow(x, y, dw, dh);
 
-  esp_err_t ret;
-  static spi_transaction_t trans;
+  spi_transaction_t* t = getTransaction();
+  t->tx_buffer = buffer;
+  t->length = len * 16;
 
-  memset(&trans, 0, sizeof(spi_transaction_t));
-
-  trans.user = (void *)1;
-  trans.tx_buffer = buffer;  //finally send the line data
-  trans.length = len * 16;   //Data length, in bits
-  trans.flags = 0;           //SPI_TRANS_USE_TXDATA flag
-
-  ret = spi_device_queue_trans(dmaHAL, &trans, portMAX_DELAY);
-  assert(ret == ESP_OK);
-
-  spiBusyCheck++;
+  spi_device_queue_trans(dmaHAL, t, portMAX_DELAY);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -819,21 +799,22 @@ bool TFT_eSPI::initDMA(bool ctrl_cs)
     .input_delay_ns = 0,
     .spics_io_num = pin,
     .flags = SPI_DEVICE_NO_DUMMY, //0,
-    .queue_size = 1,
-    .pre_cb = 0, //dc_callback, //Callback to handle D/C line
-    #ifdef CONFIG_IDF_TARGET_ESP32
-      .post_cb = 0
-    #else
-      .post_cb = dma_end_callback
-    #endif
+    .queue_size = MAX_DMA_TRANSACTIONS,
+    .pre_cb = dc_callback, //Callback to handle D/C line
+    .post_cb = post_cb
   };
   ret = spi_bus_initialize(spi_host, &buscfg, DMA_CHANNEL);
   ESP_ERROR_CHECK(ret);
   ret = spi_bus_add_device(spi_host, &devcfg, &dmaHAL);
   ESP_ERROR_CHECK(ret);
 
+  dma_queue = xQueueCreate(MAX_DMA_TRANSACTIONS, sizeof(spi_transaction_t*));
+  for (int i = 0; i < MAX_DMA_TRANSACTIONS; i++) {
+    spi_transaction_t* t = &trans[i];
+    xQueueSend(dma_queue, &t, portMAX_DELAY);
+  }
+
   DMA_Enabled = true;
-  spiBusyCheck = 0;
   return true;
 }
 
