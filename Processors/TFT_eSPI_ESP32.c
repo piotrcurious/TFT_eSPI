@@ -2,6 +2,10 @@
         // TFT_eSPI driver functions for ESP32 processors //
         ////////////////////////////////////////////////////
 
+#if defined(ESP32) && defined(ESP32_DMA)
+  #include "esp_heap_caps.h"
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // Global variables
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -32,7 +36,7 @@
   spi_device_handle_t dmaHAL;
 
 #define MAX_DMA_TRANSACTIONS 8
-  static spi_transaction_t trans[MAX_DMA_TRANSACTIONS];
+  static spi_transaction_t* trans[MAX_DMA_TRANSACTIONS];
   static xQueueHandle dma_queue = NULL;
 
   /***************************************************************************************
@@ -41,6 +45,7 @@
   ***************************************************************************************/
   static void IRAM_ATTR post_cb(spi_transaction_t *t)
   {
+    // The SPI driver should have already cleared the tx_buffer and user fields
     if (dma_queue) xQueueSendFromISR(dma_queue, &t, NULL);
   }
 
@@ -53,7 +58,6 @@
     spi_transaction_t* t = NULL;
     if (dma_queue) xQueueReceive(dma_queue, &t, portMAX_DELAY);
     if (t) {
-      memset(t, 0, sizeof(spi_transaction_t));
       t->user = (void*)1; // Set D/C to data by default
     }
     return t;
@@ -810,8 +814,13 @@ bool TFT_eSPI::initDMA(bool ctrl_cs)
 
   dma_queue = xQueueCreate(MAX_DMA_TRANSACTIONS, sizeof(spi_transaction_t*));
   for (int i = 0; i < MAX_DMA_TRANSACTIONS; i++) {
-    spi_transaction_t* t = &trans[i];
-    xQueueSend(dma_queue, &t, portMAX_DELAY);
+    trans[i] = (spi_transaction_t*)heap_caps_malloc(sizeof(spi_transaction_t), MALLOC_CAP_DMA);
+    if (trans[i] == NULL) {
+      // Handle allocation failure
+      return false;
+    }
+    memset(trans[i], 0, sizeof(spi_transaction_t));
+    xQueueSend(dma_queue, &trans[i], portMAX_DELAY);
   }
 
   DMA_Enabled = true;
@@ -825,6 +834,16 @@ bool TFT_eSPI::initDMA(bool ctrl_cs)
 void TFT_eSPI::deInitDMA(void)
 {
   if (!DMA_Enabled) return;
+
+  dmaWait(); // Wait for all transactions to complete
+
+  for (int i = 0; i < MAX_DMA_TRANSACTIONS; i++) {
+    heap_caps_free(trans[i]);
+  }
+
+  vQueueDelete(dma_queue);
+  dma_queue = NULL;
+
   spi_bus_remove_device(dmaHAL);
   spi_bus_free(spi_host);
   DMA_Enabled = false;
