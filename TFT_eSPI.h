@@ -908,6 +908,10 @@ class TFT_eSPI : public Print { friend class TFT_eSprite; // Sprite class has ac
   #define TFT_SPI_EFFICIENT_BUFFER_SIZE 64
 #endif
 
+#ifndef DMA_BUFFER_SIZE
+  #define DMA_BUFFER_SIZE 128
+#endif
+
   // DMA transaction management
   void     initDMA_queue(void);
   spi_transaction_t* getTransaction(void);
@@ -919,14 +923,6 @@ class TFT_eSPI : public Print { friend class TFT_eSprite; // Sprite class has ac
   //static uint16_t dma_buffer[MAX_DMA_TRANSACTIONS][TFT_SPI_EFFICIENT_BUFFER_SIZE];
   static QueueHandle_t dma_queue;
 
-  // DMA scratchpad buffer management
-  #define MAX_DMA_SCRATCH_BUFFERS 2
-  static uint32_t* getScratchBuffer(void);
-  static void  IRAM_ATTR    releaseScratchBuffer(uint32_t* buffer);
-  static void      initDMAScratch(void);
-
-  static uint32_t dma_scratch_buffer[MAX_DMA_SCRATCH_BUFFERS][TFT_SPI_EFFICIENT_BUFFER_SIZE / 2];
-  static volatile bool dma_scratch_buffer_in_use[MAX_DMA_SCRATCH_BUFFERS];
 #endif
 
  //-------------------------------------- protected ----------------------------------//
