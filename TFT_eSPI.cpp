@@ -979,6 +979,19 @@ void TFT_eSPI::spiwrite(uint8_t c)
 #ifndef RM68120_DRIVER
 void TFT_eSPI::writecommand(uint8_t c)
 {
+#ifdef ESP32_DMA
+  if (DMA_Enabled) {
+    spi_transaction_t* t = getTransaction();
+    t->user = (void*)0;
+    t->tx_data[0] = c >> 8;
+    t->tx_data[1] = c;
+    t->length = 16;
+    t->flags = SPI_TRANS_USE_TXDATA;
+    spi_device_queue_trans(dmaHAL, t, portMAX_DELAY);
+    return;
+  }
+#endif
+
   begin_tft_write();
 
   DC_C;
@@ -992,6 +1005,18 @@ void TFT_eSPI::writecommand(uint8_t c)
 #else
 void TFT_eSPI::writecommand(uint16_t c)
 {
+#ifdef ESP32_DMA
+  if (DMA_Enabled) {
+    spi_transaction_t* t = getTransaction();
+    t->user = (void*)0;
+    t->tx_data[0] = c;
+    t->length = 8;
+    t->flags = SPI_TRANS_USE_TXDATA;
+    spi_device_queue_trans(dmaHAL, t, portMAX_DELAY);
+    return;
+  }
+#endif
+
   begin_tft_write();
 
   DC_C;
@@ -1042,6 +1067,17 @@ void TFT_eSPI::writeRegister16(uint16_t c, uint16_t d)
 ***************************************************************************************/
 void TFT_eSPI::writedata(uint8_t d)
 {
+#ifdef ESP32_DMA
+  if (DMA_Enabled) {
+    spi_transaction_t* t = getTransaction();
+    t->tx_data[0] = d;
+    t->length = 8;
+    t->flags = SPI_TRANS_USE_TXDATA;
+    spi_device_queue_trans(dmaHAL, t, portMAX_DELAY);
+    return;
+  }
+#endif
+
   begin_tft_write();
 
   DC_D;        // Play safe, but should already be in data mode
@@ -3481,13 +3517,33 @@ void TFT_eSPI::setWindow(int32_t x0, int32_t y0, int32_t x1, int32_t y1)
       TX_FIFO = TFT_RAMWR;
     #endif
   #else
-    SPI_BUSY_CHECK;
-    DC_C; tft_Write_8(TFT_CASET);
-    DC_D; tft_Write_32C(x0, x1);
-    DC_C; tft_Write_8(TFT_PASET);
-    DC_D; tft_Write_32C(y0, y1);
-    DC_C; tft_Write_8(TFT_RAMWR);
-    DC_D;
+#ifdef ESP32_DMA
+    if (DMA_Enabled) {
+      writecommand(TFT_CASET);
+      writedata(x0 >> 8);
+      writedata(x0);
+      writedata(x1 >> 8);
+      writedata(x1);
+
+      writecommand(TFT_PASET);
+      writedata(y0 >> 8);
+      writedata(y0);
+      writedata(y1 >> 8);
+      writedata(y1);
+
+      writecommand(TFT_RAMWR);
+    }
+    else
+#endif
+    {
+      SPI_BUSY_CHECK;
+      DC_C; tft_Write_8(TFT_CASET);
+      DC_D; tft_Write_32C(x0, x1);
+      DC_C; tft_Write_8(TFT_PASET);
+      DC_D; tft_Write_32C(y0, y1);
+      DC_C; tft_Write_8(TFT_RAMWR);
+      DC_D;
+    }
   #endif // RP2040 SPI
 #endif
   //end_tft_write(); // Must be called after setWindow
