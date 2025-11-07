@@ -15,6 +15,13 @@
 
 #include "TFT_eSPI.h"
 
+#if defined (ESP32_DMA) && !defined (TFT_PARALLEL_8_BIT)
+// Forward declarations for DMA functions
+static uint32_t* getScratchBuffer(void);
+static void IRAM_ATTR releaseScratchBuffer(uint32_t* buffer);
+static void initDMAScratch(void);
+#endif
+
 #if defined (ESP32)
   #if defined(CONFIG_IDF_TARGET_ESP32S3)
     #include "Processors/TFT_eSPI_ESP32_S3.c" // Tested with SPI and 8-bit parallel
@@ -6185,10 +6192,6 @@ QueueHandle_t TFT_eSPI::dma_queue = nullptr;
 static uint32_t dma_scratch_buffer[MAX_DMA_SCRATCH_BUFFERS][TFT_SPI_EFFICIENT_BUFFER_SIZE / 2];
 static volatile bool dma_scratch_buffer_in_use[MAX_DMA_SCRATCH_BUFFERS];
 
-// Forward declarations
-static uint32_t* getScratchBuffer(void);
-static void IRAM_ATTR releaseScratchBuffer(uint32_t* buffer);
-static void initDMAScratch(void);
 
 
 /***************************************************************************************
