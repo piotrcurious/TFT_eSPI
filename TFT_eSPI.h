@@ -789,7 +789,8 @@ class TFT_eSPI : public Print { friend class TFT_eSprite; // Sprite class has ac
   void     pushImageDMA(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t const* data);
 #endif
            // Push a block of pixels into a window set up using setAddrWindow()
-  void     pushPixelsDMA(uint16_t* image, uint32_t len);
+  void     pushBlockDMA(uint16_t color, uint32_t len);
+  void     pushPixelsDMA(const uint16_t* image, uint32_t len);
 
            // Check if the DMA is complete - use while(tft.dmaBusy); for a blocking wait
   bool     dmaBusy(void); // returns true if DMA is still in progress
@@ -902,6 +903,11 @@ class TFT_eSPI : public Print { friend class TFT_eSprite; // Sprite class has ac
   bool     locked, inTransaction, lockTransaction; // SPI transaction and mutex lock flags
 
 #if defined (ESP32_DMA) && !defined (TFT_PARALLEL_8_BIT)
+
+#ifndef TFT_SPI_EFFICIENT_BUFFER_SIZE
+  #define TFT_SPI_EFFICIENT_BUFFER_SIZE 64
+#endif
+
   // DMA transaction management
   void     initDMA_queue(void);
   spi_transaction_t* getTransaction(void);
@@ -915,9 +921,9 @@ class TFT_eSPI : public Print { friend class TFT_eSprite; // Sprite class has ac
 
   // DMA scratchpad buffer management
   #define MAX_DMA_SCRATCH_BUFFERS 2
-  uint32_t* getScratchBuffer(void);
-  void  IRAM_ATTR    releaseScratchBuffer(uint32_t* buffer);
-  void      initDMAScratch(void);
+  static uint32_t* getScratchBuffer(void);
+  static void  IRAM_ATTR    releaseScratchBuffer(uint32_t* buffer);
+  static void      initDMAScratch(void);
 
   static uint32_t dma_scratch_buffer[MAX_DMA_SCRATCH_BUFFERS][TFT_SPI_EFFICIENT_BUFFER_SIZE / 2];
   static volatile bool dma_scratch_buffer_in_use[MAX_DMA_SCRATCH_BUFFERS];

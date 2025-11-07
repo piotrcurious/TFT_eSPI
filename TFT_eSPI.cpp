@@ -6276,7 +6276,7 @@ void IRAM_ATTR TFT_eSPI::dma_post_callback(spi_transaction_t* trans)
 {
     // If the transaction is using a scratch buffer, release it
     if (trans->user == (void*)2) {
-        releaseScratchBuffer((uint32_t*)trans->tx_buffer);
+        TFT_eSPI::releaseScratchBuffer((uint32_t*)trans->tx_buffer);
     }
     if(dma_queue) xQueueSendFromISR(dma_queue, &trans, NULL);
 }

@@ -206,7 +206,7 @@ void TFT_eSPI::pushPixels(const void* data_in, uint32_t len)
 ***************************************************************************************/
 void TFT_eSPI::pushBlock(uint16_t color, uint32_t len){
 #if defined (ESP32_DMA)
-  if (dma_enabled) {
+  if (DMA_Enabled) {
     pushBlockDMA(color, len);
     return;
   }
@@ -250,7 +250,7 @@ void TFT_eSPI::pushBlock(uint16_t color, uint32_t len){
 ***************************************************************************************/
 void TFT_eSPI::pushSwapBytePixels(const void* data_in, uint32_t len){
 #if defined (ESP32_DMA)
-  if (dma_enabled) {
+  if (DMA_Enabled) {
     pushPixelsDMA((uint16_t*)data_in, len);
     return;
   }
@@ -333,7 +333,7 @@ void TFT_eSPI::pushSwapBytePixels(const void* data_in, uint32_t len){
 ***************************************************************************************/
 void TFT_eSPI::pushPixels(const void* data_in, uint32_t len){
 #if defined (ESP32_DMA)
-  if (dma_enabled) {
+  if (DMA_Enabled) {
     pushPixelsDMA((uint16_t*)data_in, len);
     return;
   }
@@ -762,7 +762,6 @@ bool TFT_eSPI::initDMA(bool ctrl_cs)
   initDMA_queue();
 
   DMA_Enabled = true;
-  spiBusyCheck = 0;
   return true;
 }
 
