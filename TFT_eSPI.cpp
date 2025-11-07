@@ -3517,13 +3517,33 @@ void TFT_eSPI::setWindow(int32_t x0, int32_t y0, int32_t x1, int32_t y1)
       TX_FIFO = TFT_RAMWR;
     #endif
   #else
-    SPI_BUSY_CHECK;
-    DC_C; tft_Write_8(TFT_CASET);
-    DC_D; tft_Write_32C(x0, x1);
-    DC_C; tft_Write_8(TFT_PASET);
-    DC_D; tft_Write_32C(y0, y1);
-    DC_C; tft_Write_8(TFT_RAMWR);
-    DC_D;
+#ifdef ESP32_DMA
+    if (DMA_Enabled) {
+      writecommand(TFT_CASET);
+      writedata(x0 >> 8);
+      writedata(x0);
+      writedata(x1 >> 8);
+      writedata(x1);
+
+      writecommand(TFT_PASET);
+      writedata(y0 >> 8);
+      writedata(y0);
+      writedata(y1 >> 8);
+      writedata(y1);
+
+      writecommand(TFT_RAMWR);
+    }
+    else
+#endif
+    {
+      SPI_BUSY_CHECK;
+      DC_C; tft_Write_8(TFT_CASET);
+      DC_D; tft_Write_32C(x0, x1);
+      DC_C; tft_Write_8(TFT_PASET);
+      DC_D; tft_Write_32C(y0, y1);
+      DC_C; tft_Write_8(TFT_RAMWR);
+      DC_D;
+    }
   #endif // RP2040 SPI
 #endif
   //end_tft_write(); // Must be called after setWindow
