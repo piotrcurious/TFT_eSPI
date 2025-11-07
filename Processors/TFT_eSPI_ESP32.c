@@ -58,6 +58,7 @@
     spi_transaction_t* t = NULL;
     if (dma_queue) xQueueReceive(dma_queue, &t, portMAX_DELAY);
     if (t) {
+      memset(t, 0, sizeof(spi_transaction_t));
       t->user = (void*)1; // Set D/C to data by default
     }
     return t;
