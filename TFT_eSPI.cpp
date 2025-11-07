@@ -6176,10 +6176,56 @@ void TFT_eSPI::getSetup(setup_t &tft_settings)
 #if defined (ESP32_DMA) && !defined (TFT_PARALLEL_8_BIT)
 
 // C++ static initialisation
-// C++ static initialisation
 spi_transaction_t TFT_eSPI::dma_spi_transaction[MAX_DMA_TRANSACTIONS];
-uint16_t TFT_eSPI::dma_buffer[MAX_DMA_TRANSACTIONS][TFT_SPI_EFFICIENT_BUFFER_SIZE];
+//uint16_t TFT_eSPI::dma_buffer[MAX_DMA_TRANSACTIONS][TFT_SPI_EFFICIENT_BUFFER_SIZE];
 QueueHandle_t TFT_eSPI::dma_queue = nullptr;
+
+uint32_t TFT_eSPI::dma_scratch_buffer[MAX_DMA_SCRATCH_BUFFERS][TFT_SPI_EFFICIENT_BUFFER_SIZE / 2];
+volatile bool TFT_eSPI::dma_scratch_buffer_in_use[MAX_DMA_SCRATCH_BUFFERS];
+
+
+/***************************************************************************************
+** Function name:           initDMAScratch
+** Description:             Initialise the DMA scratch buffer tracking
+***************************************************************************************/
+void TFT_eSPI::initDMAScratch(void)
+{
+  for (int i = 0; i < MAX_DMA_SCRATCH_BUFFERS; i++) {
+    dma_scratch_buffer_in_use[i] = false;
+  }
+}
+
+/***************************************************************************************
+** Function name:           getScratchBuffer
+** Description:             Get a free DMA scratch buffer
+***************************************************************************************/
+uint32_t* TFT_eSPI::getScratchBuffer(void)
+{
+  while (true) {
+    for (int i = 0; i < MAX_DMA_SCRATCH_BUFFERS; i++) {
+      if (!dma_scratch_buffer_in_use[i]) {
+        dma_scratch_buffer_in_use[i] = true;
+        return dma_scratch_buffer[i];
+      }
+    }
+    delay(1); // Wait for a buffer to be released
+  }
+}
+
+/***************************************************************************************
+** Function name:           releaseScratchBuffer
+** Description:             Release a DMA scratch buffer
+***************************************************************************************/
+void IRAM_ATTR TFT_eSPI::releaseScratchBuffer(uint32_t* buffer)
+{
+  if (!buffer) return;
+  for (int i = 0; i < MAX_DMA_SCRATCH_BUFFERS; i++) {
+    if (buffer == dma_scratch_buffer[i]) {
+      dma_scratch_buffer_in_use[i] = false;
+      return;
+    }
+  }
+}
 
 /***************************************************************************************
 ** Function name:           initDMA_queue
@@ -6188,10 +6234,9 @@ QueueHandle_t TFT_eSPI::dma_queue = nullptr;
 void TFT_eSPI::initDMA_queue(void)
 {
   if (dma_queue) return;
+  initDMAScratch();
   dma_queue = xQueueCreate(MAX_DMA_TRANSACTIONS, sizeof(spi_transaction_t*));
   for (int i = 0; i < MAX_DMA_TRANSACTIONS; i++) {
-    // Each transaction is statically allocated and has a pointer to its own static buffer
-    dma_spi_transaction[i].tx_buffer = dma_buffer[i];
     // Add the transaction pointer to the queue
     xQueueSend(dma_queue, &dma_spi_transaction[i], 0);
   }
@@ -6206,16 +6251,10 @@ spi_transaction_t* TFT_eSPI::getTransaction(void)
   spi_transaction_t* trans;
   xQueueReceive(dma_queue, &trans, portMAX_DELAY);
 
-  // Get the index of the transaction in the static array
-  int i = trans - dma_spi_transaction;
-
   // Zero the transaction structure
   memset(trans, 0, sizeof(spi_transaction_t));
 
-  // Restore the pointer to the paired static buffer
-  trans->tx_buffer = dma_buffer[i];
-
-  trans->user = (void*)1; // Default to data transaction
+  trans->user = (void*)1; // Default to data transaction, user can set to 0 for command
   return trans;
 }
 
@@ -6235,6 +6274,10 @@ void TFT_eSPI::queueTransaction(spi_transaction_t* trans, int32_t len)
 ***************************************************************************************/
 void IRAM_ATTR TFT_eSPI::dma_post_callback(spi_transaction_t* trans)
 {
+    // If the transaction is using a scratch buffer, release it
+    if (trans->user == (void*)2) {
+        releaseScratchBuffer((uint32_t*)trans->tx_buffer);
+    }
     if(dma_queue) xQueueSendFromISR(dma_queue, &trans, NULL);
 }
 #endif

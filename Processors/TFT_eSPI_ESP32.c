@@ -580,8 +580,7 @@ void TFT_eSPI::pushBlockDMA(uint16_t color, uint32_t len)
     len_to_send = len;
     if (len_to_send > TFT_SPI_EFFICIENT_BUFFER_SIZE) len_to_send = TFT_SPI_EFFICIENT_BUFFER_SIZE;
 
-    spi_transaction_t* spi_trans = getTransaction();
-    uint32_t* buf = (uint32_t*)spi_trans->tx_buffer;
+    uint32_t* buf = getScratchBuffer();
 
     // Calculate the 32-bit value for the color
     uint32_t color32 = (color << 16) | color;
@@ -595,6 +594,10 @@ void TFT_eSPI::pushBlockDMA(uint16_t color, uint32_t len)
         }
     }
 
+    spi_transaction_t* spi_trans = getTransaction();
+    spi_trans->tx_buffer = buf;
+    // The user field is used to signal that this transaction is using a scratch buffer
+    spi_trans->user = (void*)2;
     queueTransaction(spi_trans, len_to_send * 16);
 
     len -= len_to_send;
@@ -618,7 +621,9 @@ void TFT_eSPI::pushPixelsDMA(const uint16_t* image, uint32_t len)
 
     spi_transaction_t* spi_trans = getTransaction();
 
-    // FIXME: _swapBytes logic needs to be implemented here
+    // The user's buffer is used directly.
+    // User must ensure the buffer is DMA-capable and remains valid until the transfer is complete.
+    // Byte swapping is not implemented to conserve memory.
     spi_trans->tx_buffer = p;
 
     queueTransaction(spi_trans, len_to_send * 16);
