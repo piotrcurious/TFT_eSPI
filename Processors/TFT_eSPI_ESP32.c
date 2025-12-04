@@ -572,7 +572,7 @@ void TFT_eSPI::pushBlockDMA(uint16_t color, uint32_t len)
 {
   if ((len == 0) || (!DMA_Enabled)) return;
 
-  if (_swapBytes) color = color << 8 | color >> 8;
+  // FIXME: _swapBytes logic needs to be implemented here
 
   uint32_t len_to_send;
 
@@ -619,7 +619,7 @@ void TFT_eSPI::pushPixelsDMA(const uint16_t* image, uint32_t len)
     spi_transaction_t* spi_trans = getTransaction();
 
     // FIXME: _swapBytes logic needs to be implemented here
-    spi_trans->tx_buffer = p;
+    spi_trans->tx_buffer = (void*)p;
 
     queueTransaction(spi_trans, len_to_send * 16);
 

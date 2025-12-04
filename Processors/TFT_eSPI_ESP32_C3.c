@@ -645,7 +645,7 @@ void TFT_eSPI::pushBlockDMA(uint16_t color, uint32_t len)
 {
   if ((len == 0) || (!DMA_Enabled)) return;
 
-  if (_swapBytes) color = color << 8 | color >> 8;
+  // FIXME: _swapBytes logic needs to be implemented here
 
   uint32_t len_to_send;
 
