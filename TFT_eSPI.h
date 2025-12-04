@@ -920,9 +920,8 @@ class TFT_eSPI : public Print { friend class TFT_eSprite; // Sprite class has ac
 
   #define MAX_DMA_TRANSACTIONS 8
   static spi_transaction_t dma_spi_transaction[MAX_DMA_TRANSACTIONS];
-  //static uint16_t dma_buffer[MAX_DMA_TRANSACTIONS][TFT_SPI_EFFICIENT_BUFFER_SIZE];
+  static uint16_t dma_buffer[MAX_DMA_TRANSACTIONS][TFT_SPI_EFFICIENT_BUFFER_SIZE];
   static QueueHandle_t dma_queue;
-
 #endif
 
  //-------------------------------------- protected ----------------------------------//
